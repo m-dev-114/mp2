@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, mean_squared_error
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier
@@ -17,45 +16,40 @@ st.title("🚀 AI Agile Project Management Dashboard")
 
 
 # ------------------------------------------------------------
-# SAFE CSV LOADER
+# DATA LOADER
 # ------------------------------------------------------------
 
 def load_data(file):
-    try:
-        df = pd.read_csv(file)
-        df = df.fillna(0)
-        for col in ['Success_Label', 'Expected_Overload', 'Risk_Flag']:
-            if col in df.columns:
-                df[col] = df[col].map({'Yes': 1, 'No': 0}).fillna(df[col]).astype(int)
-        return df
-    except:
-        st.error("Invalid CSV format")
-        st.stop()
+    df = pd.read_csv(file).fillna(0)
+    for col in ['Success_Label', 'Expected_Overload', 'Risk_Flag']:
+        if col in df.columns:
+            df[col] = df[col].map({'Yes': 1, 'No': 0}).fillna(df[col]).astype(int)
+    return df
 
 
 # ------------------------------------------------------------
-# CACHED MODELS
+# MODEL BUILDERS (CACHED)
 # ------------------------------------------------------------
 
 @st.cache_resource
-def get_sprint_model(X, y):
-    pipe = Pipeline([
+def build_sprint_model(X, y):
+    model = Pipeline([
         ("scale", StandardScaler()),
         ("clf", LogisticRegression(max_iter=1000))
     ])
-    pipe.fit(X, y)
-    return pipe
+    model.fit(X, y)
+    return model
 
 
 @st.cache_resource
-def get_rf_model(X, y):
+def build_rf_model(X, y):
     model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
     model.fit(X, y)
     return model
 
 
 @st.cache_resource
-def get_ttr_model(df):
+def build_ttr_model(df):
     pre = ColumnTransformer([
         ("cat", OneHotEncoder(handle_unknown="ignore"), ["Issue_Type", "Priority"]),
         ("num", "passthrough", ["Original_Estimate_Hours", "Story_Points_Issue"])
@@ -69,7 +63,7 @@ def get_ttr_model(df):
 
 
 @st.cache_resource
-def get_resource_model(df):
+def build_resource_model(df):
     pre = ColumnTransformer([
         ("summary", TfidfVectorizer(), "Summary"),
         ("labels", TfidfVectorizer(), "Labels"),
@@ -120,16 +114,12 @@ def run_agent(df, sprint_model, workload_model, burnout_model):
     results["Burnout Risk"] = float(burnout_model.predict(X4).mean())
 
     actions = []
-
     if results["Sprint Risk"] > 0.5:
-        actions.append("Reduce sprint scope or increase resources")
-
+        actions.append("Reduce sprint scope or add resources")
     if results["Overload Risk"] > 0.5:
-        actions.append("Rebalance team workload")
-
+        actions.append("Rebalance workload")
     if results["Burnout Risk"] > 0.4:
-        actions.append("Lower high-priority pressure")
-
+        actions.append("Lower high priority pressure")
     if not actions:
         actions.append("Project health stable")
 
@@ -137,14 +127,14 @@ def run_agent(df, sprint_model, workload_model, burnout_model):
 
 
 # ------------------------------------------------------------
-# UI
+# UI START
 # ------------------------------------------------------------
 
-uploaded = st.file_uploader("Upload CSV", type="csv")
+uploaded = st.file_uploader("Upload Combined CSV", type="csv")
 
 if uploaded:
     df = load_data(uploaded)
-    st.success("Data loaded")
+    st.success("Data Loaded")
     st.dataframe(df.head())
 
     tabs = st.tabs([
@@ -156,6 +146,9 @@ if uploaded:
         "AI Project Manager"
     ])
 
+    # ------------------------------------------------------------
+    # SPRINT
+    # ------------------------------------------------------------
     with tabs[0]:
         X = df[[
             'Planned_Story_Points_Sprint',
@@ -167,10 +160,38 @@ if uploaded:
             'Scope_Change'
         ]]
         y = df['Success_Label']
+
         if len(y.unique()) > 1:
-            model = get_sprint_model(X, y)
+            model = build_sprint_model(X, y)
             st.write("Accuracy:", accuracy_score(y, model.predict(X)))
 
+            st.subheader("Predict Sprint Outcome")
+
+            psp = st.number_input("Planned SP", 1, 200, 40)
+            csp = st.number_input("Completed SP", 0, 200, 30)
+            pdone = st.slider("Percent Done", 0.0, 100.0, 70.0)
+            dr = st.number_input("Days Remaining", 0, 30, 5)
+            hv = st.number_input("Velocity", 1, 100, 35)
+            bs = st.number_input("Blocked Stories", 0, 10, 1)
+            sc = st.number_input("Scope Change", -20, 20, 0)
+
+            if st.button("Predict Sprint Completion"):
+                row = pd.DataFrame([{
+                    'Planned_Story_Points_Sprint': psp,
+                    'Completed_Story_Points': csp,
+                    'Percent_Done': pdone,
+                    'Days_Remaining_Sprint': dr,
+                    'Historical_Velocity': hv,
+                    'Blocked_Stories': bs,
+                    'Scope_Change': sc
+                }])
+                pred = model.predict(row)[0]
+                prob = model.predict_proba(row)[0][1]
+                st.success(f"Probability: {prob:.2f}")
+
+    # ------------------------------------------------------------
+    # WORKLOAD
+    # ------------------------------------------------------------
     with tabs[1]:
         X = df[[
             'Planned_Story_Points_Resource',
@@ -181,16 +202,59 @@ if uploaded:
             'Current_Workload_Percent'
         ]]
         y = df['Expected_Overload']
+
         if len(y.unique()) > 1:
-            model = get_rf_model(X, y)
+            model = build_rf_model(X, y)
             st.write("Accuracy:", accuracy_score(y, model.predict(X)))
 
+            st.subheader("Predict Overload")
+
+            psp = st.number_input("Planned SP", 1, 100, 30)
+            casp = st.number_input("Assigned SP", 0, 100, 40)
+            hasp = st.number_input("Historical Avg", 1, 100, 30)
+            rdr = st.number_input("Remaining Days", 1, 30, 5)
+            hpt = st.number_input("High Priority Tasks", 0, 10, 2)
+            cwp = st.number_input("Workload %", 0, 200, 120)
+
+            if st.button("Predict Overload"):
+                row = pd.DataFrame([{
+                    'Planned_Story_Points_Resource': psp,
+                    'Current_Assigned_SP': casp,
+                    'Historical_Avg_SP': hasp,
+                    'Remaining_Days_Resource': rdr,
+                    'High_Priority_Tasks_Resource': hpt,
+                    'Current_Workload_Percent': cwp
+                }])
+                pred = model.predict(row)[0]
+                st.write("Overload Risk:", pred)
+
+    # ------------------------------------------------------------
+    # RESOLUTION TIME
+    # ------------------------------------------------------------
     with tabs[2]:
-        model = get_ttr_model(df)
+        model = build_ttr_model(df)
         X = df[["Issue_Type", "Priority", "Original_Estimate_Hours", "Story_Points_Issue"]]
         y = df["Resolution_Time_Hours"]
         st.write("MSE:", mean_squared_error(y, model.predict(X)))
 
+        issue = st.selectbox("Issue Type", ["Bug", "Story", "Task"])
+        pri = st.selectbox("Priority", ["Low", "Medium", "High"])
+        oe = st.number_input("Original Estimate", 1, 100, 8)
+        sp = st.number_input("Story Points", 1, 20, 5)
+
+        if st.button("Estimate Time"):
+            row = pd.DataFrame([{
+                "Issue_Type": issue,
+                "Priority": pri,
+                "Original_Estimate_Hours": oe,
+                "Story_Points_Issue": sp
+            }])
+            pred = model.predict(row)[0]
+            st.info(f"{pred:.1f} hours")
+
+    # ------------------------------------------------------------
+    # BURNOUT
+    # ------------------------------------------------------------
     with tabs[3]:
         X = df[[
             'Total_SP_This_Sprint',
@@ -199,18 +263,48 @@ if uploaded:
             'Consecutive_Overloads'
         ]]
         y = df['Risk_Flag']
+
         if len(y.unique()) > 1:
-            model = get_rf_model(X, y)
+            model = build_rf_model(X, y)
             st.write("Accuracy:", accuracy_score(y, model.predict(X)))
 
-    with tabs[4]:
-        get_resource_model(df)
-        st.success("Resource model ready")
+            tsp = st.number_input("Total SP", 0, 100, 40)
+            hasp = st.number_input("Historical Avg", 1, 100, 25)
+            hpt = st.number_input("High Priority Tasks", 0, 10, 2)
+            co = st.number_input("Consecutive Overloads", 0, 5, 2)
 
+            if st.button("Check Burnout"):
+                row = pd.DataFrame([[tsp, hasp, hpt, co]],
+                                   columns=X.columns)
+                st.write("Risk:", model.predict(row)[0])
+
+    # ------------------------------------------------------------
+    # RESOURCE ALLOCATION
+    # ------------------------------------------------------------
+    with tabs[4]:
+        model = build_resource_model(df)
+
+        summary = st.text_input("Summary", "Fix login bug")
+        label = st.text_input("Label", "Bug")
+        oe = st.number_input("Estimate", 1, 50, 8)
+        sp = st.number_input("Story Points", 1, 20, 5)
+
+        if st.button("Suggest Assignee"):
+            row = pd.DataFrame([{
+                "Summary": summary,
+                "Labels": label,
+                "Original_Estimate_Resource": oe,
+                "Story_Points_Resource": sp
+            }])
+            st.success(model.predict(row)[0])
+
+    # ------------------------------------------------------------
+    # AGENTIC AI
+    # ------------------------------------------------------------
     with tabs[5]:
         st.subheader("Autonomous AI Project Manager")
 
-        sprint_model = get_sprint_model(
+        sprint_model = build_sprint_model(
             df[[
                 'Planned_Story_Points_Sprint',
                 'Completed_Story_Points',
@@ -223,7 +317,7 @@ if uploaded:
             df['Success_Label']
         )
 
-        workload_model = get_rf_model(
+        workload_model = build_rf_model(
             df[[
                 'Planned_Story_Points_Resource',
                 'Current_Assigned_SP',
@@ -235,7 +329,7 @@ if uploaded:
             df['Expected_Overload']
         )
 
-        burnout_model = get_rf_model(
+        burnout_model = build_rf_model(
             df[[
                 'Total_SP_This_Sprint',
                 'Historical_Avg_SP_Burnout',
@@ -247,10 +341,6 @@ if uploaded:
 
         if st.button("Run Autonomous Analysis"):
             results, actions = run_agent(df, sprint_model, workload_model, burnout_model)
-
-            st.write("System Health")
             st.json(results)
-
-            st.write("AI Recommendations")
             for a in actions:
                 st.write("•", a)
