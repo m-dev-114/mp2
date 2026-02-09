@@ -8,24 +8,28 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, mean_squared_error
 from sklearn.preprocessing import LabelEncoder
 
-# -------------------------------
+# -------------------------------------------------
 # PAGE CONFIG
-# -------------------------------
+# -------------------------------------------------
 st.set_page_config(page_title="AI Agile Dashboard", layout="wide")
 st.title("🚀 AI Agile Project Management Dashboard + Agentic AI")
 
-# -------------------------------
-# LOAD DATA (default OR upload)
-# -------------------------------
-default_path = "/mnt/data/all_objectives_combined.csv"
+# -------------------------------------------------
+# LOAD DATA (DEPLOY SAFE)
+# -------------------------------------------------
+uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
-uploaded_file = st.file_uploader("Upload CSV (optional)", type="csv")
-
-if uploaded_file:
+if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
+    st.success("Using uploaded dataset")
+
 else:
-    df = pd.read_csv(default_path)
-    st.info("Using default dataset")
+    try:
+        df = pd.read_csv("ai_agile_sample_dataset.csv")
+        st.info("Using bundled sample dataset")
+    except:
+        st.warning("No dataset found. Please upload CSV.")
+        st.stop()
 
 df = df.fillna(0)
 
@@ -33,12 +37,11 @@ for col in ['Success_Label', 'Expected_Overload', 'Risk_Flag']:
     if col in df.columns:
         df[col] = df[col].map({'No': 0, 'Yes': 1}).fillna(df[col]).astype(int)
 
-st.success("Dataset Ready")
 st.dataframe(df.head())
 
-# -------------------------------
+# -------------------------------------------------
 # AGENTIC AI INSIGHT ENGINE
-# -------------------------------
+# -------------------------------------------------
 def agentic_insights(df):
     insights = []
 
@@ -68,9 +71,9 @@ with st.sidebar:
     for i in agentic_insights(df):
         st.write(i)
 
-# -------------------------------
+# -------------------------------------------------
 # TABS
-# -------------------------------
+# -------------------------------------------------
 tabs = st.tabs([
     "Sprint Forecast",
     "Workload Forecast",
@@ -79,9 +82,9 @@ tabs = st.tabs([
     "Resource Allocation"
 ])
 
-# -------------------------------
+# -------------------------------------------------
 # TAB 1 — SPRINT FORECAST
-# -------------------------------
+# -------------------------------------------------
 with tabs[0]:
     st.header("Sprint Completion Forecast")
 
@@ -99,12 +102,8 @@ with tabs[0]:
     y = df['Success_Label']
 
     if len(y.unique()) > 1:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
         model = LogisticRegression(max_iter=1000)
-        model.fit(X_train, y_train)
-
-        st.write("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
+        model.fit(X, y)
 
         inputs = {}
         for col in features:
@@ -124,9 +123,9 @@ with tabs[0]:
             else:
                 st.warning(f"Risk of Spillover ({prob:.2f})")
 
-# -------------------------------
+# -------------------------------------------------
 # TAB 2 — WORKLOAD FORECAST
-# -------------------------------
+# -------------------------------------------------
 with tabs[1]:
     st.header("Workload Projection")
 
@@ -164,9 +163,9 @@ with tabs[1]:
             else:
                 st.success(f"Within Capacity ({prob:.2f})")
 
-# -------------------------------
+# -------------------------------------------------
 # TAB 3 — RESOLUTION TIME
-# -------------------------------
+# -------------------------------------------------
 with tabs[2]:
     st.header("Time to Resolve Estimation")
 
@@ -196,9 +195,9 @@ with tabs[2]:
         pred = model.predict(row)[0]
         st.info(f"Estimated Time: {pred:.1f} hours")
 
-# -------------------------------
+# -------------------------------------------------
 # TAB 4 — BURNOUT RISK
-# -------------------------------
+# -------------------------------------------------
 with tabs[3]:
     st.header("Burnout Risk Alerts")
 
@@ -232,9 +231,9 @@ with tabs[3]:
             else:
                 st.success("Workload Healthy")
 
-# -------------------------------
+# -------------------------------------------------
 # TAB 5 — RESOURCE ALLOCATION
-# -------------------------------
+# -------------------------------------------------
 with tabs[4]:
     st.header("Resource Allocation Suggestions")
 
