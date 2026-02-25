@@ -132,7 +132,7 @@ if uploaded_file:
                       'Days_Remaining_Sprint','Historical_Velocity','Blocked_Stories','Scope_Change']]
             y1 = df['Success_Label']
             if len(y1.unique()) > 1:
-                m = LogisticRegression(max_iter=1000)
+                m = LogisticRegression(max_iter=1000, class_weight='balanced')
                 m.fit(X1, y1)
                 results['sprint'] = {'model': m, 'features': X1.columns.tolist()}
         except: pass
@@ -193,7 +193,7 @@ if uploaded_file:
         findings = []
         df = _df.copy()
 
-        # Sprint risk scan
+        # Sprint risk scan — aggregate, not per-row
         if 'sprint' in models:
             m = models['sprint']['model']
             cols = models['sprint']['features']
@@ -201,17 +201,23 @@ if uploaded_file:
                 X = df[cols]
                 preds  = m.predict(X)
                 probas = m.predict_proba(X)[:, 1]
-                at_risk = df[preds == 0].copy()
-                at_risk['sprint_prob'] = probas[preds == 0]
-                for _, row in at_risk.iterrows():
+                at_risk_mask = (preds == 0)
+                at_risk_count = int(at_risk_mask.sum())
+                total = len(preds)
+                pct = at_risk_count / total if total > 0 else 0
+                if at_risk_count > 0:
+                    avg_prob   = float(probas[at_risk_mask].mean())
+                    avg_blocked = float(df.loc[at_risk_mask, 'Blocked_Stories'].mean()) if 'Blocked_Stories' in df.columns else 0
+                    avg_days    = float(df.loc[at_risk_mask, 'Days_Remaining_Sprint'].mean()) if 'Days_Remaining_Sprint' in df.columns else 0
+                    sev = 'critical' if pct > 0.4 else 'warning'
                     findings.append({
-                        'severity': 'critical' if row['sprint_prob'] < 0.3 else 'warning',
+                        'severity': sev,
                         'objective': 'Sprint Completion',
-                        'icon': '🔴' if row['sprint_prob'] < 0.3 else '🟡',
-                        'title': f"Sprint spillover risk detected",
-                        'detail': (f"Completion probability: {row['sprint_prob']:.0%} | "
-                                   f"Blocked stories: {int(row.get('Blocked_Stories',0))} | "
-                                   f"Days remaining: {int(row.get('Days_Remaining_Sprint',0))}"),
+                        'icon': '🔴' if sev == 'critical' else '🟡',
+                        'title': f"{at_risk_count} of {total} sprints ({pct:.0%}) at risk of spillover",
+                        'detail': (f"Avg completion probability: {avg_prob:.0%} | "
+                                   f"Avg blocked stories: {avg_blocked:.1f} | "
+                                   f"Avg days remaining: {avg_days:.1f}"),
                         'action': "Consider reducing scope or unblocking stories immediately."
                     })
             except: pass
@@ -496,7 +502,7 @@ The autonomous agent scanned your project data and identified **{len(criticals)}
             y1 = df['Success_Label']
             if len(y1.unique()) > 1:
                 X1_train, X1_test, y1_train, y1_test = train_test_split(X1, y1, test_size=0.2, random_state=42)
-                sprint_model = LogisticRegression(max_iter=1000)
+                sprint_model = LogisticRegression(max_iter=1000, class_weight='balanced')
                 sprint_model.fit(X1_train, y1_train)
                 y1_pred = sprint_model.predict(X1_test)
                 st.write(f"✅ Accuracy: {accuracy_score(y1_test, y1_pred):.2f}")
