@@ -96,12 +96,31 @@ encoders = {} # label encoders
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df = df.fillna(0)
-    for col in ['Success_Label', 'Expected_Overload', 'Risk_Flag']:
+
+    # Handle both string ('Yes'/'No') and float/probability labels
+    def binarize_col(series, threshold=0.5):
+        if series.dtype == object:
+            return series.map({'No': 0, 'Yes': 1}).fillna(0).astype(int)
+        return (series > threshold).astype(int)
+
+    thresholds = {'Success_Label': 0.5, 'Expected_Overload': 0.5, 'Risk_Flag': 0.3}
+    for col, thresh in thresholds.items():
         if col in df.columns:
-            df[col] = df[col].map({'No': 0, 'Yes': 1}).fillna(df[col]).astype(int)
+            df[col] = binarize_col(df[col], threshold=thresh)
 
     st.success("✅ File uploaded successfully!")
-    st.write(df.head())
+
+    # Dataset summary
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📋 Total Records", f"{len(df):,}")
+    c2.metric("📊 Features", len(df.columns))
+    if 'Success_Label' in df.columns:
+        c3.metric("🔴 Sprints at Risk", int((df['Success_Label']==0).sum()))
+    if 'Risk_Flag' in df.columns:
+        c4.metric("⚠️ Burnout Flags", int(df['Risk_Flag'].sum()))
+
+    with st.expander("👀 Preview Data"):
+        st.write(df.head())
 
     # ── train all models silently so the agent can use them ─────────────────
     def train_all(df):
@@ -519,7 +538,10 @@ The autonomous agent scanned your project data and identified **{len(criticals)}
                 workload_model = RandomForestClassifier()
                 workload_model.fit(X2_train, y2_train)
                 y2_pred = workload_model.predict(X2_test)
-                st.write(f"✅ Accuracy: {accuracy_score(y2_test, y2_pred):.2f}")
+                acc2 = accuracy_score(y2_test, y2_pred)
+                st.write(f"✅ Accuracy: {acc2:.2f}")
+                if acc2 < 0.60:
+                    st.info("ℹ️ **Low predictive signal detected.** The workload features in this dataset have near-zero correlation with the overload label — this is common in synthetic data. In production, richer features (e.g. task completion rate, meeting hours) would improve accuracy significantly.")
                 st.text(classification_report(y2_test, y2_pred))
 
                 st.subheader("🔍 Predict Overload Risk")
@@ -596,7 +618,10 @@ The autonomous agent scanned your project data and identified **{len(criticals)}
                 burnout_model = RandomForestClassifier()
                 burnout_model.fit(X4_train, y4_train)
                 y4_pred = burnout_model.predict(X4_test)
-                st.write(f"✅ Accuracy: {accuracy_score(y4_test, y4_pred):.2f}")
+                acc4 = accuracy_score(y4_test, y4_pred)
+                st.write(f"✅ Accuracy: {acc4:.2f}")
+                if acc4 < 0.60:
+                    st.info("ℹ️ **Low predictive signal detected.** Burnout features show near-zero correlation with the risk label in this dataset. Real burnout prediction benefits from additional signals like overtime hours, meeting load, and leave history.")
                 st.text(classification_report(y4_test, y4_pred))
 
                 st.subheader("🔍 Check Burnout Risk")
